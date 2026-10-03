@@ -29,7 +29,7 @@ public final class LibraryScanner {
         catch (RuntimeException e) { return node; }
         for (DocumentFile file : files) {
             if (file.isDirectory()) node.children.add(scanFolder(file));
-            else if (isMp3(file)) node.children.add(LibraryNode.track(readTrack(file, folder)));
+            else if (isSupportedAudio(file)) node.children.add(LibraryNode.track(readTrack(file, folder)));
         }
         return node;
     }
@@ -49,10 +49,16 @@ public final class LibraryScanner {
         return new Track(file.getUri().toString(), parent.getUri().toString(), safeName(file), artist, album);
     }
 
-    private boolean isMp3(DocumentFile file) {
+    private boolean isSupportedAudio(DocumentFile file) {
         String name = safeName(file).toLowerCase(Locale.ROOT);
         String type = file.getType();
-        return name.endsWith(".mp3") || "audio/mpeg".equalsIgnoreCase(type) || "audio/mp3".equalsIgnoreCase(type);
+        if (name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".wave")) return true;
+        if (type == null) return false;
+        return "audio/mpeg".equalsIgnoreCase(type)
+                || "audio/mp3".equalsIgnoreCase(type)
+                || "audio/wav".equalsIgnoreCase(type)
+                || "audio/x-wav".equalsIgnoreCase(type)
+                || "audio/vnd.wave".equalsIgnoreCase(type);
     }
 
     private String safeName(DocumentFile file) {
