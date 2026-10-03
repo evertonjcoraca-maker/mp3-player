@@ -4,6 +4,7 @@ import android.media.audiofx.LoudnessEnhancer;
 import android.os.Bundle;
 
 import androidx.annotation.Nullable;
+import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -14,6 +15,9 @@ import androidx.media3.session.SessionResult;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @UnstableApi
 public class PlaybackService extends MediaSessionService {
@@ -45,6 +49,22 @@ public class PlaybackService extends MediaSessionService {
                         .setAvailableSessionCommands(accepted.availableSessionCommands.buildUpon().add(luffyCommand).build())
                         .setAvailablePlayerCommands(accepted.availablePlayerCommands)
                         .build();
+            }
+
+            @Override
+            public ListenableFuture<List<MediaItem>> onAddMediaItems(MediaSession session,
+                                                                      MediaSession.ControllerInfo controller,
+                                                                      List<MediaItem> mediaItems) {
+                List<MediaItem> playableItems = new ArrayList<>(mediaItems.size());
+                for (MediaItem item : mediaItems) {
+                    String requestUri = item.requestMetadata.mediaUri == null
+                            ? null
+                            : item.requestMetadata.mediaUri.toString();
+                    String playableUri = PlaybackUriResolver.resolve(requestUri, item.mediaId);
+                    if (playableUri == null) playableItems.add(item);
+                    else playableItems.add(item.buildUpon().setUri(playableUri).build());
+                }
+                return Futures.immediateFuture(playableItems);
             }
 
             @Override
