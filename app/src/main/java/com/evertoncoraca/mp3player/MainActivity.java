@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.UriPermission;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -11,6 +12,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
@@ -31,6 +33,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionCommand;
@@ -65,6 +68,8 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private MediaController controller;
     private ListenableFuture<MediaController> controllerFuture;
     private Track currentTrack;
+    private Track pendingTrack;
+    private boolean pendingPlayFirst;
     private boolean userSeeking;
 
     private TextView folderText, nowTitle, nowArtist, currentTime, totalTime, volumeValue, luffyStatus;
@@ -79,9 +84,20 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private final ActivityResultLauncher<Uri> folderPicker = registerForActivityResult(
             new ActivityResultContracts.OpenDocumentTree(), uri -> {
                 if (uri == null) return;
+                boolean persisted = false;
                 try {
                     getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } catch (SecurityException ignored) {}
+                    persisted = hasPersistedReadPermission(uri);
+                } catch (SecurityException e) {
+                    Toast.makeText(this,
+                            "O Android não permitiu manter o acesso à pasta. Se as músicas pararem de abrir, escolha a pasta novamente.",
+                            Toast.LENGTH_LONG).show();
+                }
+                if (!persisted) {
+                    Toast.makeText(this,
+                            "A pasta foi aberta, mas o acesso permanente não foi confirmado pelo Android.",
+                            Toast.LENGTH_LONG).show();
+                }
                 String value = uri.toString();
                 prefs.addRoot(value);
                 prefs.setActiveRoot(value);
@@ -140,12 +156,13 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
         tabArtists.setOnClickListener(v -> setViewMode(ViewMode.ARTISTS));
         tabFolders.setOnClickListener(v -> setViewMode(ViewMode.FOLDERS));
 
-        findViewById(R.id.previousButton).setOnClickListener(v -> { if (controller != null) controller.seekToPreviousMediaItem(); });
-        playPauseButton.setOnClickListener(v -> {
-            if (controller == null) return;
-            if (controller.isPlaying()) controller.pause(); else controller.play();
+        findViewById(R.id.previousButton).setOnClickListener(v -> {
+            if (controller != null) controller.seekToPreviousMediaItem();
         });
-        findViewById(R.id.nextButton).setOnClickListener(v -> { if (controller != null) controller.seekToNextMediaItem(); });
+        playPauseButton.setOnClickListener(v -> handlePlayPause());
+        findViewById(R.id.nextButton).setOnClickListener(v -> {
+            if (controller != null) controller.seekToNextMediaItem();
+        });
 
         volumeSeek.setProgress(prefs.volume());
         volumeValue.setText(String.valueOf(prefs.volume()));
@@ -192,24 +209,77 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private void connectController() {
         SessionToken token = new SessionToken(this, new ComponentName(this, PlaybackService.class));
         controllerFuture = new MediaController.Builder(this, token).buildAsync();
-        controllerFuture.addListener(() -> {
+        controllerFuture.addListener(() -> mainHandler.post(() -> {
             try {
                 controller = controllerFuture.get();
                 controller.setVolume(prefs.volume() / 100f);
                 controller.addListener(new Player.Listener() {
                     @Override public void onIsPlayingChanged(boolean isPlaying) { refreshPlayerUi(); }
+
+                    @Override public void onPlaybackStateChanged(int playbackState) { refreshPlayerUi(); }
+
                     @Override public void onMediaItemTransition(@Nullable MediaItem mediaItem, int reason) {
                         syncCurrentTrackFromController();
                         refreshPlayerUi();
+                    }
+
+                    @Override public void onPlayerError(PlaybackException error) {
+                        String message = "Erro ao tocar: " + error.getErrorCodeName();
+                        if (error.getMessage() != null && !error.getMessage().isBlank()) {
+                            message += "\n" + error.getMessage();
+                        }
+                        Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
                     }
                 });
                 sendLuffy(prefs.luffy());
                 syncCurrentTrackFromController();
                 refreshPlayerUi();
+
+                if (pendingTrack != null) {
+                    Track track = pendingTrack;
+                    pendingTrack = null;
+                    playTrack(track);
+                } else if (pendingPlayFirst) {
+                    pendingPlayFirst = false;
+                    playFirstTrack();
+                }
             } catch (Exception e) {
-                Toast.makeText(this, "Não foi possível iniciar o reprodutor.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this,
+                        "Não foi possível iniciar o reprodutor: " + e.getClass().getSimpleName(),
+                        Toast.LENGTH_LONG).show();
             }
-        }, MoreExecutors.directExecutor());
+        }), MoreExecutors.directExecutor());
+    }
+
+    private void handlePlayPause() {
+        if (controller == null) {
+            pendingPlayFirst = true;
+            Toast.makeText(this, "Preparando o reprodutor…", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (controller.isPlaying()) {
+            controller.pause();
+            return;
+        }
+        if (controller.getMediaItemCount() > 0) {
+            controller.play();
+            return;
+        }
+        playFirstTrack();
+    }
+
+    private void playFirstTrack() {
+        if (activeLibrary == null) {
+            pendingPlayFirst = true;
+            Toast.makeText(this, "A biblioteca ainda está carregando.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<Track> tracks = activeLibrary.flattenTracks();
+        if (tracks.isEmpty()) {
+            Toast.makeText(this, "Não há MP3 disponível nesta pasta.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        playTrack(tracks.get(0));
     }
 
     private void loadActiveRoot() {
@@ -230,6 +300,10 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
                 folderText.setText("Pasta: " + finalNode.name);
                 setLoading(false);
                 setViewMode(viewMode == ViewMode.FOLDERS ? ViewMode.MUSIC : viewMode);
+                if (pendingPlayFirst && controller != null) {
+                    pendingPlayFirst = false;
+                    playFirstTrack();
+                }
             });
         });
     }
@@ -351,14 +425,41 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     @Override public boolean isCurrentTrack(Track track) { return currentTrack != null && currentTrack.equals(track); }
 
     private void playTrack(Track track) {
-        if (controller == null || activeLibrary == null) return;
+        if (activeLibrary == null) {
+            Toast.makeText(this, "A biblioteca ainda está carregando.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (controller == null) {
+            pendingTrack = track;
+            Toast.makeText(this, "Preparando o reprodutor…", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!canOpenTrack(track)) {
+            Toast.makeText(this,
+                    "O Android não permitiu abrir este MP3. Escolha novamente a pasta de músicas.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
         List<Track> queue = activeLibrary.flattenTracks();
         int startIndex = queue.indexOf(track);
         if (startIndex < 0) { queue = List.of(track); startIndex = 0; }
         List<MediaItem> items = new ArrayList<>();
         for (Track item : queue) {
-            MediaMetadata metadata = new MediaMetadata.Builder().setTitle(item.displayName).setArtist(item.artist).setAlbumTitle(item.album).build();
-            items.add(new MediaItem.Builder().setUri(item.uri).setMediaId(item.uri).setMediaMetadata(metadata).build());
+            MediaTransportData transport = MediaTransportData.fromTrack(item);
+            MediaMetadata metadata = new MediaMetadata.Builder()
+                    .setTitle(item.displayName)
+                    .setArtist(item.artist)
+                    .setAlbumTitle(item.album)
+                    .build();
+            MediaItem.RequestMetadata requestMetadata = new MediaItem.RequestMetadata.Builder()
+                    .setMediaUri(Uri.parse(transport.requestUri))
+                    .build();
+            items.add(new MediaItem.Builder()
+                    .setMediaId(transport.mediaId)
+                    .setRequestMetadata(requestMetadata)
+                    .setMediaMetadata(metadata)
+                    .build());
         }
         controller.setMediaItems(items, startIndex, 0);
         controller.setRepeatMode(activeLibrary.rootActsAsPlaylist() ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
@@ -368,6 +469,21 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
         refreshPlayerUi();
         loadCover(track);
         adapter.notifyDataSetChanged();
+    }
+
+    private boolean canOpenTrack(Track track) {
+        try (ParcelFileDescriptor ignored = getContentResolver().openFileDescriptor(Uri.parse(track.uri), "r")) {
+            return ignored != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean hasPersistedReadPermission(Uri uri) {
+        for (UriPermission permission : getContentResolver().getPersistedUriPermissions()) {
+            if (permission.isReadPermission() && permission.getUri().equals(uri)) return true;
+        }
+        return false;
     }
 
     private void syncCurrentTrackFromController() {
