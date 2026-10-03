@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Everton MP3 Player</string>
+    <string name="music">Músicas</string>
+    <string name="albums">Álbuns</string>
+    <string name="artists">Artistas</string>
+    <string name="folders">Pastas</string>
+    <string name="back">Voltar</string>
+    <string name="volume">Volume</string>
+    <string name="luffy">Luffy</string>
+    <string name="on">Ligado</string>
+    <string name="off">Desligado</string>
+    <string name="choose_folder">Escolher pasta de músicas</string>
+    <string name="search_hint">Buscar em todas as pastas…</string>
+</resources>
