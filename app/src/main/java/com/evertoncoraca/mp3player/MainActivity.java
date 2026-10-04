@@ -50,6 +50,7 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private LibraryNode activeLibrary;
     private ViewMode viewMode = ViewMode.MUSIC;
     private NativePlaybackEngine playback;
+    private VoiceUiController voiceUi;
     private Track currentTrack;
     private boolean pendingPlayFirst;
     private boolean userSeeking;
@@ -108,12 +109,31 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
                 Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
                 refreshPlayerUi();
             }
+
+            @Override public void onVolumeChanged(int volume) {
+                if (!userSeeking) {
+                    volumeSeek.setProgress(volume);
+                    volumeValue.setText(String.valueOf(volume));
+                }
+                prefs.setVolume(volume);
+            }
         });
         playback.setVolume(prefs.volume() / 100f);
         playback.setLuffy(prefs.luffy());
         setupUi();
+        voiceUi = new VoiceUiController(this, prefs, this::applyVoiceSearch);
         if (prefs.roots().isEmpty()) showEmpty(true); else loadActiveRoot();
         scheduleProgressTick();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        if (voiceUi != null) voiceUi.onStart();
+    }
+
+    @Override protected void onStop() {
+        if (voiceUi != null) voiceUi.onStop();
+        super.onStop();
     }
 
     private void bindViews() {
@@ -308,7 +328,7 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private void showSettingsDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("Configurações")
-                .setMessage("Motor de áudio: MediaPlayer nativo do Android.\n\nLuffy reforça o volume percebido em +6 dB. O aplicativo não usa equalizador.\n\nAs pastas são acessadas somente pelas permissões que você escolheu no Android.")
+                .setMessage("Motor de áudio: Media3 em serviço de reprodução.\n\nLuffy reforça o volume percebido em +6 dB. O aplicativo não usa equalizador.\n\nComando de voz: diga ‘Player’ e em seguida o comando.\n\nAs pastas são acessadas somente pelas permissões que você escolheu no Android.")
                 .setPositiveButton("OK", null).show();
     }
 
@@ -322,6 +342,13 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
             searchInput.setText("");
             setViewMode(viewMode);
         }
+    }
+
+    private void applyVoiceSearch(String query) {
+        if (query == null || query.isBlank()) return;
+        searchInput.setVisibility(View.VISIBLE);
+        searchInput.setText(query);
+        searchInput.setSelection(searchInput.length());
     }
 
     private void runSearch(String query) {
