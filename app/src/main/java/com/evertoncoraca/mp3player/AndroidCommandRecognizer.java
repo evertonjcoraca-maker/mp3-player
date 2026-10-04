@@ -46,7 +46,7 @@ public final class AndroidCommandRecognizer {
             } else {
                 recognizer = SpeechRecognizer.createSpeechRecognizer(context);
             }
-        } catch (RuntimeException | UnsupportedOperationException e) {
+        } catch (RuntimeException e) {
             try {
                 recognizer = SpeechRecognizer.createSpeechRecognizer(context);
             } catch (RuntimeException second) {
