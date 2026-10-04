@@ -29,15 +29,17 @@ public class PlaybackService extends MediaSessionService {
     private MediaSession mediaSession;
     private LoudnessEnhancer loudnessEnhancer;
     private boolean luffyEnabled;
+    private LibraryPrefs prefs;
 
     @Override public void onCreate() {
         super.onCreate();
-        LibraryPrefs prefs = new LibraryPrefs(this);
+        prefs = new LibraryPrefs(this);
         luffyEnabled = prefs.luffy();
         player = new ExoPlayer.Builder(this).build();
         player.setVolume(prefs.volume() / 100f);
         player.addListener(new Player.Listener() {
             @Override public void onAudioSessionIdChanged(int audioSessionId) { attachLoudness(audioSessionId); }
+            @Override public void onVolumeChanged(float volume) { prefs.setVolume(Math.round(volume * 100f)); }
         });
 
         SessionCommand luffyCommand = new SessionCommand(COMMAND_SET_LUFFY, Bundle.EMPTY);
@@ -57,9 +59,7 @@ public class PlaybackService extends MediaSessionService {
                                                                       List<MediaItem> mediaItems) {
                 List<MediaItem> playableItems = new ArrayList<>(mediaItems.size());
                 for (MediaItem item : mediaItems) {
-                    String requestUri = item.requestMetadata.mediaUri == null
-                            ? null
-                            : item.requestMetadata.mediaUri.toString();
+                    String requestUri = item.requestMetadata.mediaUri == null ? null : item.requestMetadata.mediaUri.toString();
                     String playableUri = PlaybackUriResolver.resolve(requestUri, item.mediaId);
                     if (playableUri == null) playableItems.add(item);
                     else playableItems.add(item.buildUpon().setUri(playableUri).build());
@@ -82,7 +82,7 @@ public class PlaybackService extends MediaSessionService {
 
     private void setLuffy(boolean enabled) {
         luffyEnabled = enabled;
-        new LibraryPrefs(this).setLuffy(enabled);
+        prefs.setLuffy(enabled);
         if (loudnessEnhancer != null) {
             try {
                 loudnessEnhancer.setTargetGain(LUFFY_GAIN_MB);
