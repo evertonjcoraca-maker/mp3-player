@@ -45,18 +45,22 @@ Use a two-stage pipeline so the full speech recognizer is not listening continuo
 - Wake-word detection must be offline and must not require a cloud API key.
 - Initial implementation: Vosk Android with a small on-device English acoustic model and a restricted keyword grammar centered on `player`.
 - The wake-word engine is wrapped behind a small `WakeWordRecognizer` interface so it can be replaced later without changing command logic.
+- The service keeps a short in-memory PCM ring buffer while listening. Audio is never intentionally saved as a user recording.
 
 ### Stage B — command recognition
 
 After detecting **“Player”**:
 
-1. temporarily release/pause the local wake-word microphone capture;
-2. invoke Android `SpeechRecognizer` for the command phrase;
-3. parse the recognized text into a typed command;
-4. execute it;
-5. return to local wake-word listening.
+1. mark the wake-word point in the rolling audio buffer;
+2. stop/pause wake-word decoding while continuing the command-capture handoff;
+3. invoke Android `SpeechRecognizer` for the command phrase;
+4. parse the recognized text into a typed command;
+5. execute it;
+6. return to local wake-word listening.
 
-The implementation must also support a single utterance such as **“Player, próxima música”** by preserving/processing text that follows the wake word when available; if only “Player” is detected, the command recognizer opens a short command-listening window.
+The normal usage is one phrase, for example **“Player, próxima música”**, without requiring a second button press or a second wake word.
+
+For Android API 33+ recognizers that support injected audio, the implementation should feed the buffered/post-wake PCM stream to `SpeechRecognizer` through `RecognizerIntent.EXTRA_AUDIO_SOURCE`. This avoids losing the first command words during the wake-word-to-command handoff. If the installed recognizer ignores injected audio, or on older Android versions, fall back to an immediate live-microphone handoff; in that fallback path a very short natural pause after “Player” may be required on some devices. Saying only **“Player”** always opens the short command-listening window.
 
 ### Language handling
 
@@ -213,8 +217,8 @@ At runtime:
 - A recognition error returns the service to wake-word listening rather than disabling voice control.
 - If Android revokes microphone access or the recognizer becomes unavailable, set voice state to OFF and surface a clear status when the Activity is visible.
 - Prevent multiple overlapping recognition sessions.
-- Release microphone, recognizer, model, and executor resources on service shutdown.
-- No voice audio recordings are stored by the app.
+- Release microphone, recognizer, model, ring buffer, and executor resources on service shutdown.
+- No voice audio recordings are stored by the app; the rolling buffer exists only in memory and is discarded continuously.
 
 ## 9. UI state synchronization
 
@@ -265,7 +269,8 @@ On a real Android device:
 10. say `Player, encerrar comando de voz` and verify listening stops/button becomes OFF;
 11. verify voice cannot be reactivated by speech while OFF;
 12. manually tap the button and verify listening resumes;
-13. verify all screen buttons continue to work while voice is ON and while it is OFF.
+13. verify all screen buttons continue to work while voice is ON and while it is OFF;
+14. verify a natural single phrase such as `Player, próxima música` works without repeating the wake word; on recognizers lacking injected-audio support, document whether a small post-wake pause is needed.
 
 ## 11. Non-goals for this version
 
