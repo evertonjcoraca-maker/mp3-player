@@ -20,8 +20,8 @@ public final class LibraryMatcher {
     }
 
     public LibrarySelection findSong(String query) {
-        Track track = bestTrack(query, Track::displayNameForMatch);
-        return track == null ? null : new LibrarySelection(List.of(track), track);
+        LibrarySelection exact = exactSong(query);
+        return exact != null ? exact : partialSong(query);
     }
 
     public LibrarySelection findAlbum(String query) {
@@ -51,13 +51,6 @@ public final class LibraryMatcher {
         List<Track> shuffled = new ArrayList<>(orderedTracks);
         Collections.shuffle(shuffled, random == null ? new Random() : random);
         return new LibrarySelection(shuffled, shuffled.get(0));
-    }
-
-    private Track bestTrack(String query, Function<Track, String> field) {
-        LibrarySelection exact = exactSong(query);
-        if (exact != null) return exact.startTrack;
-        LibrarySelection partial = partialSong(query);
-        return partial == null ? null : partial.startTrack;
     }
 
     private LibrarySelection exactSong(String query) {
