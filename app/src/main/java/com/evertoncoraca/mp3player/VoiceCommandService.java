@@ -11,7 +11,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
@@ -20,21 +22,26 @@ import androidx.media3.session.SessionToken;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
-public final class VoiceCommandService extends Service implements WakeWordRecognizer.Listener,
-        VoiceCommandExecutor.Host {
+import java.util.List;
+
+public final class VoiceCommandService extends Service implements VoiceCommandExecutor.Host {
     public static final String ACTION_START = "com.evertoncoraca.mp3player.voice.START";
     public static final String ACTION_STOP = "com.evertoncoraca.mp3player.voice.STOP";
     private static final String CHANNEL_ID = "voice_commands";
     private static final int NOTIFICATION_ID = 2002;
+    private static final long RESTART_DELAY_MS = 250L;
+    private static final long ERROR_RESTART_DELAY_MS = 800L;
+
+    private final Handler main = new Handler(Looper.getMainLooper());
 
     private LibraryPrefs prefs;
-    private WakeWordRecognizer wakeWord;
     private AndroidCommandRecognizer commandRecognizer;
     private VoiceCommandParser parser;
+    private RecognizedCommandSelector selector;
     private ListenableFuture<MediaController> controllerFuture;
     private MediaController controller;
     private VoiceCommandExecutor executor;
-    private String localeTag = "en-US";
+    private String localeTag = "pt-BR";
     private boolean started;
     private boolean commandInProgress;
 
@@ -42,7 +49,7 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
         super.onCreate();
         prefs = new LibraryPrefs(this);
         parser = new VoiceCommandParser();
-        wakeWord = new VoskWakeWordRecognizer(this, this);
+        selector = new RecognizedCommandSelector(parser);
         commandRecognizer = new AndroidCommandRecognizer(this);
 
         SessionToken token = new SessionToken(this, new ComponentName(this, PlaybackService.class));
@@ -51,7 +58,7 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
             try {
                 controller = controllerFuture.get();
                 executor = new VoiceCommandExecutor(this, controller, this);
-                if (started) wakeWord.start();
+                if (started) scheduleListening(0L);
             } catch (Exception e) {
                 disableBecauseUnavailable();
             }
@@ -72,7 +79,7 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
         started = true;
         prefs.setVoiceEnabled(true);
         VoiceState.broadcast(this, true);
-        if (controller != null) wakeWord.start();
+        if (controller != null) scheduleListening(0L);
         return START_NOT_STICKY;
     }
 
@@ -90,7 +97,7 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
         Notification notification = new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_music_placeholder)
                 .setContentTitle("Everton MP3 Player")
-                .setContentText("Comando de voz ativo — diga “Player”")
+                .setContentText("Comando de voz ativo — diga “Player” + o comando")
                 .setOngoing(true)
                 .setContentIntent(pending)
                 .build();
@@ -102,41 +109,52 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
         }
     }
 
-    @Override public void onWakeWord() {
-        if (!started || commandInProgress) return;
+    private void scheduleListening(long delayMs) {
+        main.removeCallbacks(this::beginListening);
+        main.postDelayed(this::beginListening, Math.max(0L, delayMs));
+    }
+
+    private void beginListening() {
+        if (!started || commandInProgress || executor == null) return;
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            disableBecauseUnavailable();
+            return;
+        }
+
         commandInProgress = true;
-        wakeWord.stop();
         commandRecognizer.listen(localeTag, new AndroidCommandRecognizer.Callback() {
-            @Override public void onResult(String text) {
-                VoiceCommand command = parser.parse("Player, " + (text == null ? "" : text));
+            @Override public void onResults(List<String> texts) {
+                VoiceCommand command = selector.select(texts);
                 if (command == null || executor == null) {
-                    commandFinished();
+                    finishRecognition(RESTART_DELAY_MS);
                     return;
                 }
                 executor.execute(command);
             }
 
-            @Override public void onError(String message) {
-                commandFinished();
+            @Override public void onError(String message, boolean fatal) {
+                if (fatal) disableBecauseUnavailable();
+                else finishRecognition(ERROR_RESTART_DELAY_MS);
             }
         });
     }
 
-    @Override public void onError(String message) {
-        if (!started) return;
-        disableBecauseUnavailable();
+    private void finishRecognition(long delayMs) {
+        commandInProgress = false;
+        if (started) scheduleListening(delayMs);
     }
 
     @Override public void setLanguage(String localeTag) {
-        if ("pt-BR".equalsIgnoreCase(localeTag)) this.localeTag = "pt-BR";
-        else this.localeTag = "en-US";
+        if ("en-US".equalsIgnoreCase(localeTag)) this.localeTag = "en-US";
+        else this.localeTag = "pt-BR";
     }
 
     @Override public void disableVoice() {
         started = false;
         commandInProgress = false;
+        main.removeCallbacksAndMessages(null);
         prefs.setVoiceEnabled(false);
-        if (wakeWord != null) wakeWord.stop();
         if (commandRecognizer != null) commandRecognizer.cancel();
         VoiceState.broadcast(this, false);
         stopForeground(STOP_FOREGROUND_REMOVE);
@@ -146,15 +164,16 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
     private void disableBecauseUnavailable() {
         started = false;
         commandInProgress = false;
+        main.removeCallbacksAndMessages(null);
         prefs.setVoiceEnabled(false);
+        if (commandRecognizer != null) commandRecognizer.cancel();
         VoiceState.broadcast(this, false);
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
 
     @Override public void commandFinished() {
-        commandInProgress = false;
-        if (started && wakeWord != null) wakeWord.start();
+        finishRecognition(RESTART_DELAY_MS);
     }
 
     @Nullable @Override public IBinder onBind(Intent intent) { return null; }
@@ -162,8 +181,8 @@ public final class VoiceCommandService extends Service implements WakeWordRecogn
     @Override public void onDestroy() {
         started = false;
         commandInProgress = false;
+        main.removeCallbacksAndMessages(null);
         if (commandRecognizer != null) commandRecognizer.release();
-        if (wakeWord != null) wakeWord.release();
         if (executor != null) executor.release();
         if (controller != null) controller.release();
         else if (controllerFuture != null) MediaController.releaseFuture(controllerFuture);
