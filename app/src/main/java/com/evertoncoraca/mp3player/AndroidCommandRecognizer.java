@@ -26,9 +26,9 @@ public final class AndroidCommandRecognizer {
     }
 
     public boolean isAvailable() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) return true;
-        return SpeechRecognizer.isRecognitionAvailable(context);
+        if (SpeechRecognizer.isRecognitionAvailable(context)) return true;
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && SpeechRecognizer.isOnDeviceRecognitionAvailable(context);
     }
 
     public void listen(String localeTag, Callback callback) {
@@ -40,19 +40,30 @@ public final class AndroidCommandRecognizer {
 
         releaseRecognizer();
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(context);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                     && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
                 recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context);
-            } else {
-                recognizer = SpeechRecognizer.createSpeechRecognizer(context);
             }
         } catch (RuntimeException e) {
-            try {
-                recognizer = SpeechRecognizer.createSpeechRecognizer(context);
-            } catch (RuntimeException second) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+                try {
+                    recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context);
+                } catch (RuntimeException second) {
+                    callback.onError("Não foi possível iniciar o reconhecimento de voz.", true);
+                    return;
+                }
+            } else {
                 callback.onError("Não foi possível iniciar o reconhecimento de voz.", true);
                 return;
             }
+        }
+
+        if (recognizer == null) {
+            callback.onError("Não foi possível iniciar o reconhecimento de voz.", true);
+            return;
         }
 
         listening = true;
@@ -94,7 +105,6 @@ public final class AndroidCommandRecognizer {
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, localeTag == null ? "pt-BR" : localeTag);
         intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
-        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
         intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 900L);
         intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 500L);
 
