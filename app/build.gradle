@@ -2,11 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
-configurations {
-    voskModel
-}
-
-def voskModelAssetsDir = "$buildDir/generated/voskModelAssets"
+def voskModelName = 'vosk-model-small-en-us-0.15'
+def voskModelUrl = "https://alphacephei.com/vosk/models/${voskModelName}.zip"
+def voskModelZip = file("$buildDir/downloads/${voskModelName}.zip")
+def voskModelAssetsRoot = file("$buildDir/generated/voskModelAssets")
+def voskModelAssetsDir = file("$voskModelAssetsRoot/model-en-us")
 
 android {
     namespace 'com.evertoncoraca.mp3player'
@@ -39,21 +39,39 @@ android {
 
     sourceSets {
         main {
-            assets.srcDir voskModelAssetsDir
+            assets.srcDir voskModelAssetsRoot
+        }
+    }
+}
+
+tasks.register('downloadVoskModel') {
+    outputs.file voskModelZip
+    doLast {
+        voskModelZip.parentFile.mkdirs()
+        if (!voskModelZip.exists()) {
+            File partial = file("${voskModelZip}.part")
+            if (partial.exists()) partial.delete()
+            ant.get(src: voskModelUrl, dest: partial, verbose: true)
+            if (!partial.renameTo(voskModelZip)) {
+                throw new GradleException('Não foi possível finalizar o download do modelo Vosk.')
+            }
         }
     }
 }
 
 tasks.register('extractVoskModel', Sync) {
-    from {
-        configurations.voskModel.collect { zipTree(it) }
+    dependsOn tasks.named('downloadVoskModel')
+    from({ zipTree(voskModelZip) }) {
+        include "${voskModelName}/**"
+        eachFile { details ->
+            details.path = details.path.replaceFirst("^${voskModelName}/", '')
+        }
+        includeEmptyDirs = false
     }
-    include 'assets/**'
-    eachFile { details ->
-        details.path = details.path.replaceFirst('^assets/', '')
-    }
-    includeEmptyDirs = false
     into voskModelAssetsDir
+    doLast {
+        file("$voskModelAssetsDir/uuid").text = 'everton-vosk-small-en-us-0.15'
+    }
 }
 
 tasks.named('preBuild').configure {
@@ -68,7 +86,6 @@ dependencies {
     implementation 'androidx.media3:media3-session:1.11.1'
     implementation 'com.alphacephei:vosk-android:0.3.75@aar'
     implementation 'net.java.dev.jna:jna:5.18.1@aar'
-    voskModel 'com.alphacephei:vosk-model-en:0.3.75@aar'
 
     testImplementation 'junit:junit:4.13.2'
 }
