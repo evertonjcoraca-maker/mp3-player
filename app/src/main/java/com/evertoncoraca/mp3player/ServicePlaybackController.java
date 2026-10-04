@@ -28,6 +28,7 @@ final class ServicePlaybackController {
     private final Context context;
     private final Listener listener;
     private final ListenableFuture<MediaController> controllerFuture;
+    private final PendingTransportState pendingTransport = new PendingTransportState();
     private MediaController controller;
 
     private List<Track> pendingQueue;
@@ -81,20 +82,44 @@ final class ServicePlaybackController {
                 pendingStart = null;
                 playQueue(queue, start, repeat);
             }
+            applyPendingTransport();
         } catch (Exception e) {
             listener.onError("Não foi possível conectar ao serviço de reprodução.");
         }
     }
 
+    private void applyPendingTransport() {
+        if (controller == null) return;
+
+        int navigation = pendingTransport.consumeNavigationDelta();
+        while (navigation > 0) {
+            if (controller.hasNextMediaItem()) controller.seekToNextMediaItem();
+            navigation--;
+        }
+        while (navigation < 0) {
+            if (controller.getCurrentPosition() > 3000) controller.seekTo(0);
+            else if (controller.hasPreviousMediaItem()) controller.seekToPreviousMediaItem();
+            else controller.seekTo(0);
+            navigation++;
+        }
+
+        long seek = pendingTransport.consumeSeekPosition();
+        if (seek != PendingTransportState.NO_SEEK) controller.seekTo(seek);
+
+        if (pendingTransport.consumePauseRequested()) controller.pause();
+        else if (pendingTransport.consumePlayRequested()) controller.play();
+    }
+
     void playQueue(List<Track> tracks, Track start, boolean repeatAll) {
+        if (tracks == null || tracks.isEmpty()) {
+            listener.onError("A fila de reprodução está vazia.");
+            return;
+        }
         if (controller == null) {
             pendingQueue = List.copyOf(tracks);
             pendingStart = start;
             pendingRepeatAll = repeatAll;
-            return;
-        }
-        if (tracks == null || tracks.isEmpty()) {
-            listener.onError("A fila de reprodução está vazia.");
+            pendingTransport.requestPlay();
             return;
         }
         int startIndex = tracks.indexOf(start);
@@ -105,19 +130,34 @@ final class ServicePlaybackController {
         controller.play();
     }
 
-    void play() { if (controller != null) controller.play(); }
-    void pause() { if (controller != null) controller.pause(); }
-    void next() { if (controller != null && controller.hasNextMediaItem()) controller.seekToNextMediaItem(); }
+    void play() {
+        if (controller == null) pendingTransport.requestPlay();
+        else controller.play();
+    }
+
+    void pause() {
+        if (controller == null) pendingTransport.requestPause();
+        else controller.pause();
+    }
+
+    void next() {
+        if (controller == null) pendingTransport.requestNext();
+        else if (controller.hasNextMediaItem()) controller.seekToNextMediaItem();
+    }
 
     void previous() {
-        if (controller == null) return;
+        if (controller == null) {
+            pendingTransport.requestPrevious();
+            return;
+        }
         if (controller.getCurrentPosition() > 3000) controller.seekTo(0);
         else if (controller.hasPreviousMediaItem()) controller.seekToPreviousMediaItem();
         else controller.seekTo(0);
     }
 
     void seekTo(long positionMs) {
-        if (controller != null) controller.seekTo(Math.max(0L, positionMs));
+        if (controller == null) pendingTransport.requestSeek(positionMs);
+        else controller.seekTo(Math.max(0L, positionMs));
     }
 
     long getDuration() {
