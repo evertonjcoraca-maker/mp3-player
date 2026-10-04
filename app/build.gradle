@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+configurations {
+    voskModel
+}
+
+def voskModelAssetsDir = "$buildDir/generated/voskModelAssets"
+
 android {
     namespace 'com.evertoncoraca.mp3player'
     compileSdk 36
@@ -30,6 +36,28 @@ android {
     testOptions {
         unitTests.returnDefaultValues = true
     }
+
+    sourceSets {
+        main {
+            assets.srcDir voskModelAssetsDir
+        }
+    }
+}
+
+tasks.register('extractVoskModel', Sync) {
+    from {
+        configurations.voskModel.collect { zipTree(it) }
+    }
+    include 'assets/**'
+    eachFile { details ->
+        details.path = details.path.replaceFirst('^assets/', '')
+    }
+    includeEmptyDirs = false
+    into voskModelAssetsDir
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('extractVoskModel')
 }
 
 dependencies {
@@ -38,8 +66,9 @@ dependencies {
     implementation 'androidx.documentfile:documentfile:1.1.0'
     implementation 'androidx.media3:media3-exoplayer:1.11.1'
     implementation 'androidx.media3:media3-session:1.11.1'
-    implementation 'com.alphacephei:vosk-android:0.3.75'
-    implementation 'com.alphacephei:vosk-model-en:0.3.75'
+    implementation 'com.alphacephei:vosk-android:0.3.75@aar'
+    implementation 'net.java.dev.jna:jna:5.18.1@aar'
+    voskModel 'com.alphacephei:vosk-model-en:0.3.75@aar'
 
     testImplementation 'junit:junit:4.13.2'
 }
