@@ -20,6 +20,7 @@ public final class LibraryRepository {
     public synchronized Snapshot snapshot() {
         List<Track> all = new ArrayList<>();
         List<Track> active = new ArrayList<>();
+        boolean activeRepeatAll = false;
         String activeRoot = prefs.activeRoot();
         List<String> roots = prefs.roots();
         cache.keySet().retainAll(roots);
@@ -31,9 +32,12 @@ public final class LibraryRepository {
             }
             List<Track> tracks = node.flattenTracks();
             all.addAll(tracks);
-            if (root.equals(activeRoot)) active.addAll(tracks);
+            if (root.equals(activeRoot)) {
+                active.addAll(tracks);
+                activeRepeatAll = node.rootActsAsPlaylist();
+            }
         }
-        return new Snapshot(all, active);
+        return new Snapshot(all, active, activeRepeatAll);
     }
 
     public synchronized void invalidate() { cache.clear(); }
@@ -41,10 +45,12 @@ public final class LibraryRepository {
     public static final class Snapshot {
         public final List<Track> allTracks;
         public final List<Track> activeTracks;
+        public final boolean activeRepeatAll;
 
-        Snapshot(List<Track> allTracks, List<Track> activeTracks) {
+        Snapshot(List<Track> allTracks, List<Track> activeTracks, boolean activeRepeatAll) {
             this.allTracks = List.copyOf(allTracks);
             this.activeTracks = List.copyOf(activeTracks);
+            this.activeRepeatAll = activeRepeatAll;
         }
 
         public LibraryMatcher matcher() { return new LibraryMatcher(allTracks, activeTracks); }
