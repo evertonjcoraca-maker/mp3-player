@@ -2,12 +2,6 @@ plugins {
     id 'com.android.application'
 }
 
-def voskModelName = 'vosk-model-small-en-us-0.15'
-def voskModelUrl = "https://alphacephei.com/vosk/models/${voskModelName}.zip"
-def voskModelZip = file("$buildDir/downloads/${voskModelName}.zip")
-def voskModelAssetsRoot = file("$buildDir/generated/voskModelAssets")
-def voskModelAssetsDir = file("$voskModelAssetsRoot/model-en-us")
-
 android {
     namespace 'com.evertoncoraca.mp3player'
     compileSdk 36
@@ -16,8 +10,8 @@ android {
         applicationId 'com.evertoncoraca.mp3player'
         minSdk 26
         targetSdk 36
-        versionCode 5
-        versionName '1.5.0'
+        versionCode 6
+        versionName '1.5.1'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
@@ -36,46 +30,6 @@ android {
     testOptions {
         unitTests.returnDefaultValues = true
     }
-
-    sourceSets {
-        main {
-            assets.srcDir voskModelAssetsRoot
-        }
-    }
-}
-
-tasks.register('downloadVoskModel') {
-    outputs.file voskModelZip
-    doLast {
-        voskModelZip.parentFile.mkdirs()
-        if (!voskModelZip.exists()) {
-            File partial = file("${voskModelZip}.part")
-            if (partial.exists()) partial.delete()
-            ant.get(src: voskModelUrl, dest: partial, verbose: true)
-            if (!partial.renameTo(voskModelZip)) {
-                throw new GradleException('Não foi possível finalizar o download do modelo Vosk.')
-            }
-        }
-    }
-}
-
-tasks.register('extractVoskModel', Sync) {
-    dependsOn tasks.named('downloadVoskModel')
-    from({ zipTree(voskModelZip) }) {
-        include "${voskModelName}/**"
-        eachFile { details ->
-            details.path = details.path.replaceFirst("^${voskModelName}/", '')
-        }
-        includeEmptyDirs = false
-    }
-    into voskModelAssetsDir
-    doLast {
-        file("$voskModelAssetsDir/uuid").text = 'everton-vosk-small-en-us-0.15'
-    }
-}
-
-tasks.named('preBuild').configure {
-    dependsOn tasks.named('extractVoskModel')
 }
 
 dependencies {
@@ -84,8 +38,6 @@ dependencies {
     implementation 'androidx.documentfile:documentfile:1.1.0'
     implementation 'androidx.media3:media3-exoplayer:1.11.1'
     implementation 'androidx.media3:media3-session:1.11.1'
-    implementation 'com.alphacephei:vosk-android:0.3.75@aar'
-    implementation 'net.java.dev.jna:jna:5.18.1@aar'
 
     testImplementation 'junit:junit:4.13.2'
 }
