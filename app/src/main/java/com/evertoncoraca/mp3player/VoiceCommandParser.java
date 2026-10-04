@@ -24,15 +24,17 @@ public final class VoiceCommandParser {
         Matcher wake = WAKE_PREFIX.matcher(text);
         if (!wake.find()) return null;
 
-        String body = text.substring(wake.end()).trim();
-        body = trimOuterPunctuation(body);
+        String body = trimOuterPunctuation(text.substring(wake.end()).trim());
         if (body.isBlank()) return null;
-
-        VoiceCommand queryCommand = parseQueryCommand(body);
-        if (queryCommand != null) return queryCommand;
-
         String n = normalize(body);
 
+        VoiceCommand fixed = parseFixedCommand(n);
+        if (fixed != null) return fixed;
+
+        return parseQueryCommand(body);
+    }
+
+    private VoiceCommand parseFixedCommand(String n) {
         if (equalsAny(n, "encerrar comando de voz", "desligar comando de voz", "disable voice command", "stop voice commands"))
             return VoiceCommand.simple(VoiceCommand.Type.DISABLE_VOICE);
 
