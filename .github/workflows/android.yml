@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ "main", "feat/native-mp3-player", "feat/voice-commands" ]
+    branches: [ "main", "feat/native-mp3-player", "feat/voice-commands", "fix/voice-and-manual-controls" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
