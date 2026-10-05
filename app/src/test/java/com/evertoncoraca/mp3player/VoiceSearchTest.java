@@ -16,4 +16,8 @@ public class VoiceSearchTest {
         assertEquals("", VoiceSearch.firstResult(null));
         assertEquals("", VoiceSearch.firstResult(List.of()));
     }
+
+    @Test public void voiceRecognitionDefaultsToEnglish() {
+        assertEquals("en-US", VoiceSearch.RECOGNITION_LANGUAGE);
+    }
 }
