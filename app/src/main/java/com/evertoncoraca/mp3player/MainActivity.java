@@ -221,7 +221,7 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private void startVoiceSearch() {
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, VoiceSearch.RECOGNITION_LANGUAGE)
                 .putExtra(RecognizerIntent.EXTRA_PROMPT, "Fale o nome da pasta, música ou artista");
         try {
             voiceSearchLauncher.launch(intent);
