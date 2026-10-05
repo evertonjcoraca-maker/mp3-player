@@ -3,6 +3,8 @@ package com.evertoncoraca.mp3player;
 import java.util.List;
 
 public final class VoiceSearch {
+    public static final String RECOGNITION_LANGUAGE = "en-US";
+
     private VoiceSearch() {}
 
     public static String firstResult(List<String> results) {
