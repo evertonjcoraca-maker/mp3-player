@@ -11,5 +11,5 @@
     <string name="on">Ligado</string>
     <string name="off">Desligado</string>
     <string name="choose_folder">Escolher pasta de músicas</string>
-    <string name="search_hint">Buscar em todas as pastas…</string>
+    <string name="search_hint">Buscar pasta, música ou artista…</string>
 </resources>
