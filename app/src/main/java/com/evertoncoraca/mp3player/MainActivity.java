@@ -1,6 +1,8 @@
 package com.evertoncoraca.mp3player;
 
+import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.UriPermission;
 import android.graphics.Bitmap;
@@ -9,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.speech.RecognizerIntent;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
@@ -55,13 +58,13 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     private boolean userSeeking;
 
     private TextView folderText, nowTitle, nowArtist, currentTime, totalTime, volumeValue, luffyStatus;
-    private Button tabMusic, tabAlbums, tabArtists, tabFolders, playPauseButton;
+    private Button tabMusic, tabAlbums, tabArtists, tabFolders, playPauseButton, voiceSearchButton;
     private EditText searchInput;
     private ProgressBar loading;
     private SeekBar progressSeek, volumeSeek;
     private Switch luffySwitch;
     private ImageView coverImage;
-    private View emptyPanel;
+    private View emptyPanel, searchPanel;
 
     private final ActivityResultLauncher<Uri> folderPicker = registerForActivityResult(
             new ActivityResultContracts.OpenDocumentTree(), uri -> {
@@ -85,6 +88,16 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
                 prefs.setActiveRoot(value);
                 cache.remove(value);
                 loadActiveRoot();
+            });
+
+    private final ActivityResultLauncher<Intent> voiceSearchLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) return;
+                ArrayList<String> results = result.getData().getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                String recognized = VoiceSearch.firstResult(results);
+                if (recognized.isBlank()) return;
+                searchInput.setText(recognized);
+                searchInput.setSelection(recognized.length());
             });
 
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -129,7 +142,9 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
         tabArtists = findViewById(R.id.tabArtists);
         tabFolders = findViewById(R.id.tabFolders);
         playPauseButton = findViewById(R.id.playPauseButton);
+        searchPanel = findViewById(R.id.searchPanel);
         searchInput = findViewById(R.id.searchInput);
+        voiceSearchButton = findViewById(R.id.voiceSearchButton);
         loading = findViewById(R.id.loading);
         progressSeek = findViewById(R.id.progressSeek);
         volumeSeek = findViewById(R.id.volumeSeek);
@@ -149,6 +164,7 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
         findViewById(R.id.settingsButton).setOnClickListener(v -> showSettingsDialog());
         findViewById(R.id.searchButton).setOnClickListener(v -> toggleSearch());
         findViewById(R.id.backButton).setOnClickListener(v -> navigateBack());
+        voiceSearchButton.setOnClickListener(v -> startVoiceSearch());
 
         tabMusic.setOnClickListener(v -> setViewMode(ViewMode.MUSIC));
         tabAlbums.setOnClickListener(v -> setViewMode(ViewMode.ALBUMS));
@@ -200,6 +216,18 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
             }
             @Override public void afterTextChanged(Editable s) {}
         });
+    }
+
+    private void startVoiceSearch() {
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
+                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Fale o nome da pasta, música ou artista");
+        try {
+            voiceSearchLauncher.launch(intent);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Busca por voz não disponível neste aparelho.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void handlePlayPause() {
@@ -260,11 +288,18 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
         setTabColor(tabAlbums, mode == ViewMode.ALBUMS);
         setTabColor(tabArtists, mode == ViewMode.ARTISTS);
         setTabColor(tabFolders, mode == ViewMode.FOLDERS);
-        searchInput.setVisibility(View.GONE);
-        if (mode == ViewMode.FOLDERS) { adapter.setRoot(buildRootsView()); return; }
+        searchPanel.setVisibility(View.GONE);
+        showCurrentViewContent();
+    }
+
+    private void showCurrentViewContent() {
+        if (viewMode == ViewMode.FOLDERS) {
+            adapter.setRoot(buildRootsView());
+            return;
+        }
         if (activeLibrary == null) return;
-        if (mode == ViewMode.MUSIC) adapter.setRoot(activeLibrary);
-        else if (mode == ViewMode.ALBUMS) adapter.setRoot(activeLibrary.albumsView());
+        if (viewMode == ViewMode.MUSIC) adapter.setRoot(activeLibrary);
+        else if (viewMode == ViewMode.ALBUMS) adapter.setRoot(activeLibrary.albumsView());
         else adapter.setRoot(activeLibrary.artistsView());
     }
 
@@ -313,24 +348,26 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
     }
 
     private void toggleSearch() {
-        boolean show = searchInput.getVisibility() != View.VISIBLE;
-        searchInput.setVisibility(show ? View.VISIBLE : View.GONE);
+        boolean show = searchPanel.getVisibility() != View.VISIBLE;
+        searchPanel.setVisibility(show ? View.VISIBLE : View.GONE);
         if (show) {
             searchInput.requestFocus();
             ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT);
         } else {
             searchInput.setText("");
-            setViewMode(viewMode);
+            showCurrentViewContent();
         }
     }
 
     private void runSearch(String query) {
-        if (searchInput.getVisibility() != View.VISIBLE) return;
-        if (query.isBlank()) { setViewMode(viewMode); return; }
+        if (searchPanel.getVisibility() != View.VISIBLE) return;
+        if (query.isBlank()) {
+            showCurrentViewContent();
+            return;
+        }
         setLoading(true);
         executor.execute(() -> {
-            String needle = query.toLowerCase(Locale.ROOT);
-            List<Track> matches = new ArrayList<>();
+            List<LibraryNode> roots = new ArrayList<>();
             for (String rootUri : prefs.roots()) {
                 LibraryNode node = cache.get(rootUri);
                 if (node == null) {
@@ -338,21 +375,24 @@ public class MainActivity extends AppCompatActivity implements LibraryAdapter.Li
                     cache.put(rootUri, node);
                     rootNames.put(rootUri, node.name);
                 }
-                for (Track track : node.flattenTracks()) {
-                    if (track.displayName.toLowerCase(Locale.ROOT).contains(needle)
-                            || track.artist.toLowerCase(Locale.ROOT).contains(needle)
-                            || track.album.toLowerCase(Locale.ROOT).contains(needle)) matches.add(track);
-                }
+                roots.add(node);
             }
-            mainHandler.post(() -> { adapter.setFlatTracks(matches); setLoading(false); });
+            LibrarySearch.Result result = LibrarySearch.find(roots, query);
+            LibraryNode searchRoot = LibraryNode.folder("Busca", "virtual:search");
+            searchRoot.children.addAll(result.folders);
+            for (Track track : result.tracks) searchRoot.children.add(LibraryNode.track(track));
+            mainHandler.post(() -> {
+                adapter.setRoot(searchRoot);
+                setLoading(false);
+            });
         });
     }
 
     private void navigateBack() {
-        if (searchInput.getVisibility() == View.VISIBLE) {
-            searchInput.setVisibility(View.GONE);
+        if (searchPanel.getVisibility() == View.VISIBLE) {
+            searchPanel.setVisibility(View.GONE);
             searchInput.setText("");
-            setViewMode(viewMode);
+            showCurrentViewContent();
         } else if (adapter.canGoBack()) adapter.goBack();
         else getOnBackPressedDispatcher().onBackPressed();
     }
